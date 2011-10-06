@@ -1,0 +1,133 @@
+<?php
+/**
+ * Cache every page except the listed pages.
+ */
+define('PAGE_CACHEABILITY_NOTLISTED', 0);
+
+/**
+ * Cache only the listed pages.
+ */
+define('PAGE_CACHEABILITY_LISTED', 1);
+
+/**
+ * Cache page if the associated PHP code returns TRUE.
+ */
+define('PAGE_CACHEABILITY_PHP', 2);
+
+/**
+ * Chache the page untill tomorrow 00:00:01.
+ */
+define('PAGE_CACHE_EXPIRATION_TOMORROW', -2);
+
+/**
+ * Cache the page untill next week.
+ */
+define('PAGE_CACHE_EXPIRATION_NEXT_WEEK', -3);
+
+
+
+/**
+ * Implements hook_boot().
+ */
+function enhanced_page_cache_boot() {
+  // Just make sure the module is loaded for boot and the API is available.
+}
+
+/**
+ * Implements hook_page_cache_cid_alter().
+ * @param string $cache_key
+ */
+function enhanced_page_cache_page_cache_cid_alter(&$cid) {
+  // Localized caching.
+  if (
+    ($country_selector_module = drupal_get_filename('module', 'ec_country_selector')) &&
+    ($geoip_module = drupal_get_filename('module', 'geoip')) &&
+    ($geoip_module_include = drupal_get_filename('module', 'geoip', 'geoip.inc'))
+  ) {
+    require_once $country_selector_module;
+    require_once $geoip_module;
+    require_once $geoip_module_include;
+
+    //$cid .= '|' . geoip_country_code();
+    $cid .= '|' . ec_country_selector_get_country(FALSE);
+  }
+}
+
+/**
+ * Implements hook_page_cache_object_alter().
+ * @param stdClass $cache
+ */
+function enhanced_page_cache_page_cache_object_alter(&$cache) {
+  $page_cacheability = variable_get('enhanced_page_cache_cacheability', PAGE_CACHEABILITY_NOTLISTED);
+  $page_cacheability_pages = variable_get('enhanced_page_cache_cacheability_pages');
+
+  // Set the expiration time of the cached page.
+  switch (variable_get('enhanced_page_cache_expiration', CACHE_TEMPORARY)) {
+    case PAGE_CACHE_EXPIRATION_TOMORROW:
+      $page_cache_expiration = strtotime('tomorrow');
+      break;
+    case PAGE_CACHE_EXPIRATION_NEXT_WEEK:
+      $weekdays = date_week_days_untranslated() ;
+      $page_cache_expiration = strtotime($weekdays[variable_get('date_first_day', 1)] . ' next week midnight');
+      break;
+    // Default - keep it untouched.
+    case CACHE_TEMPORARY:
+      $page_cache_expiration = $cache->expire;
+      break;
+    default:
+      $time_addition = variable_get('enhanced_page_cache_expiration', 0);
+      $page_cache_expiration = time() + $time_addition;
+  }
+  $cache->expire = $page_cache_expiration;
+
+  // Match path if necessary.
+  $page_match = TRUE;
+  if ($page_cacheability_pages) {
+    // Convert path to lowercase. This allows comparison of the same path
+    // with different case. Ex: /Page, /page, /PAGE.
+    $pages = drupal_strtolower($page_cacheability_pages);
+    if ($page_cacheability < PAGE_CACHEABILITY_PHP) {
+      // Convert the Drupal path to lowercase
+      $path = drupal_strtolower(drupal_get_path_alias($_GET['q']));
+      // Compare the lowercase internal and lowercase path alias (if any).
+      $page_match = drupal_match_path($path, $pages);
+      if ($path != $_GET['q']) {
+        $page_match = $page_match || drupal_match_path($_GET['q'], $pages);
+      }
+      // When $page_cacheability has a value of 0 (PAGE_CACHEABILITY_NOTLISTED),
+      // all pages are cached except those listed in $page_cacheability_pages.
+      // When set to 1 (PAGE_CACHEABILITY_LISTED), only on those
+      // pages listed in $page_cacheability_pages are cached.
+      $page_match = !($page_cacheability xor $page_match);
+    }
+    elseif (module_exists('php')) {
+      $page_match = php_eval($page_cacheability_pages);
+    }
+    else {
+      $page_match = FALSE;
+    }
+  }
+  if (!$page_match) {
+    $cache = FALSE;
+    return;
+  }
+
+  // Make sure the same changes to the cid apply here.
+  enhanced_page_cache_page_cache_cid_alter($cache->cid);
+}
+
+/**
+ * Implements hook_menu().
+ */
+function enhanced_page_cache_menu() {
+  $items['admin/config/development/performance/page-cache'] = array(
+    'title' => 'Configure Page Caching',
+    'description' => 'Configure page caching.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('enhanced_page_cache_configuration_form'),
+    'access arguments' => array('administer site configuration'),
+    'file' => 'enhanced_page_cache.admin.inc',
+  	'type' => MENU_LOCAL_TASK,
+  );
+  return $items;
+}

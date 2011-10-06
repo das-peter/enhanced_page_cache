@@ -1,0 +1,4 @@
+name = Enhanced Page Cache
+description = Demonstrates how the core page cache could be easyily extendet to provide much more flexibility.
+package = Performance and scalability
+core = 7.x

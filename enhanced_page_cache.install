@@ -1,0 +1,18 @@
+<?php
+
+/**
+ * @file
+ * Install, update and uninstall functions for the enhanced_page_cache module.
+ */
+
+/**
+ * Implements hook_enable().
+ */
+function enhanced_page_cache_enable() {
+  // Make sure this module is available on bootstrap.
+  db_update('system')
+    ->fields(array('bootstrap' => 1))
+    ->condition('type', 'module')
+    ->condition('name', 'enhanced_page_cache')
+    ->execute();
+}
